@@ -6,6 +6,14 @@ This project focuses on detecting construction-related objects in images using t
 
 The application uses Streamlit to provide a simple and interactive web interface where users can upload images and perform object detection.
 
+## 🌐 Live Demo
+
+Try the deployed application here:
+
+🔗 **[Construction Object Detection – Live App](https://construction-object-detection.streamlit.app/)**
+
+Upload a construction-site image and detect objects using the trained YOLO model.
+
 ## 🎯 Project Objectives
 
 - Detect construction-related objects from images.
@@ -30,6 +38,7 @@ Image_project/
 ├── app.py
 ├── naga.pt
 ├── requirements.txt
+├── packages.txt
 ├── README.md
 └── .gitignore
 ```
@@ -98,9 +107,8 @@ The application will open in your browser.
 
 Data Science Fresher | Python | Machine Learning | Deep Learning | Computer Vision
 
-GitHub: https://github.com/Nagaraju681
+GitHub: [Nagaraju681](https://github.com/Nagaraju681)
 
 ---
 
 ⭐ If you find this project useful, feel free to explore the repository and share your feedback!
-
