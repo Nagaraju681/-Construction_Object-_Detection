@@ -4,6 +4,9 @@ from ultralytics import YOLO
 from PIL import Image
 import numpy as np
 import pandas as pd
+import cv2
+import tempfile
+import os
 
 # Page configuration
 st.set_page_config(
@@ -16,23 +19,16 @@ st.set_page_config(
 st.title("🏗️ Construction Object Detection")
 
 st.write(
-    "Upload a construction site image to detect objects "
-    "using your trained YOLO11 model."
+    "Upload construction site images or videos "
+    "to detect objects using your trained YOLO11 model."
 )
 
-# Load trained model
+# Load trained YOLO model
 @st.cache_resource
 def load_model():
-    model = YOLO("naga.pt")
-    return model
+    return YOLO("naga.pt")
 
 model = load_model()
-
-# Upload image
-uploaded_file = st.file_uploader(
-    "Upload an image",
-    type=["jpg", "jpeg", "png"]
-)
 
 # Confidence threshold
 confidence = st.slider(
@@ -43,112 +39,293 @@ confidence = st.slider(
     step=0.05
 )
 
-if uploaded_file is not None:
+# Input type selection
+input_type = st.radio(
+    "Select Input Type",
+    ["Image", "Video"],
+    horizontal=True
+)
 
-    # Read uploaded image
-    image = Image.open(uploaded_file).convert("RGB")
 
-    st.subheader("Original Image")
-    st.image(image, use_container_width=True)
+# =====================================
+# IMAGE DETECTION
+# =====================================
 
-    # Convert image to NumPy array
-    image_array = np.array(image)
+if input_type == "Image":
 
-    # Perform object detection
-    results = model.predict(
-        source=image_array,
-        conf=confidence
+    uploaded_file = st.file_uploader(
+        "Upload Construction Image",
+        type=["jpg", "jpeg", "png"]
     )
 
-    # Get annotated image
-    annotated_image = results[0].plot()
+    if uploaded_file is not None:
 
-    # Convert BGR to RGB
-    annotated_image = annotated_image[:, :, ::-1]
+        image = Image.open(uploaded_file).convert("RGB")
 
-    # Display detected image
-    st.subheader("Detection Results")
+        col1, col2 = st.columns(2)
 
-    st.image(
-        annotated_image,
-        caption="Detected Objects",
-        use_container_width=True
+        with col1:
+            st.subheader("Original Image")
+            st.image(image, use_container_width=True)
+
+        # Convert image to NumPy
+        image_array = np.array(image)
+
+        # YOLO prediction
+        results = model.predict(
+            source=image_array,
+            conf=confidence,
+            verbose=False
+        )
+
+        # Annotated image
+        annotated_image = results[0].plot()
+        annotated_image = cv2.cvtColor(
+            annotated_image,
+            cv2.COLOR_BGR2RGB
+        )
+
+        with col2:
+            st.subheader("Detection Results")
+            st.image(
+                annotated_image,
+                use_container_width=True
+            )
+
+        # Detection details
+        boxes = results[0].boxes
+
+        if boxes is not None and len(boxes) > 0:
+
+            object_names = []
+            scores = []
+
+            for box in boxes:
+
+                class_id = int(box.cls[0])
+                class_name = model.names[class_id]
+                score = float(box.conf[0])
+
+                object_names.append(class_name)
+                scores.append(score)
+
+            # Calculate metrics
+            total_objects = len(object_names)
+            avg_score = np.mean(scores) * 100
+            max_score = max(scores) * 100
+
+            st.subheader("📊 Detection Score Summary")
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric("Total Objects", total_objects)
+            col2.metric("Average Confidence", f"{avg_score:.2f}%")
+            col3.metric("Highest Confidence", f"{max_score:.2f}%")
+
+            # Detection table
+            st.subheader("Detected Object Details")
+
+            df = pd.DataFrame({
+                "Object Name": object_names,
+                "Confidence Score (%)": [
+                    round(s * 100, 2) for s in scores
+                ]
+            })
+
+            st.dataframe(df, use_container_width=True)
+
+            # Class count
+            st.subheader("Class-wise Detection Count")
+
+            class_counts = df["Object Name"].value_counts()
+
+            st.bar_chart(class_counts)
+
+        else:
+            st.warning("No objects detected.")
+
+
+# =====================================
+# VIDEO DETECTION
+# =====================================
+
+elif input_type == "Video":
+
+    uploaded_video = st.file_uploader(
+        "Upload Construction Video",
+        type=["mp4", "avi", "mov"]
     )
 
-    # Detection summary
-    st.subheader("📊 Detection Score Summary")
+    if uploaded_video is not None:
 
-    boxes = results[0].boxes
-
-    if boxes is not None and len(boxes) > 0:
-
-        object_names = []
-        confidence_scores = []
-
-        for box in boxes:
-
-            class_id = int(box.cls[0])
-            class_name = model.names[class_id]
-            confidence_score = float(box.conf[0])
-
-            object_names.append(class_name)
-            confidence_scores.append(confidence_score)
-
-        # Calculate scores
-        total_objects = len(object_names)
-
-        average_confidence = (
-            sum(confidence_scores) / total_objects
+        # Save uploaded video temporarily
+        temp_input = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".mp4"
         )
 
-        highest_confidence = max(confidence_scores)
+        temp_input.write(uploaded_video.read())
+        temp_input.close()
 
-        # Display metrics
-        col1, col2, col3 = st.columns(3)
+        input_path = temp_input.name
 
-        col1.metric(
-            "Total Objects Detected",
-            total_objects
+        cap = cv2.VideoCapture(input_path)
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(
+            cap.get(cv2.CAP_PROP_FRAME_COUNT)
         )
 
-        col2.metric(
-            "Average Confidence",
-            f"{average_confidence * 100:.2f}%"
+        # Output video
+        output_file = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".mp4"
         )
 
-        col3.metric(
-            "Highest Confidence",
-            f"{highest_confidence * 100:.2f}%"
+        output_path = output_file.name
+        output_file.close()
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+        out = cv2.VideoWriter(
+            output_path,
+            fourcc,
+            fps if fps > 0 else 25,
+            (width, height)
         )
 
-        # Individual object details
-        st.subheader("🔍 Detected Object Details")
+        st.subheader("Video Processing")
 
-        detection_data = pd.DataFrame({
-            "Object Name": object_names,
-            "Confidence Score (%)": [
-                round(score * 100, 2)
-                for score in confidence_scores
-            ]
-        })
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-        st.dataframe(
-            detection_data,
-            use_container_width=True,
-            hide_index=True
-        )
+        frame_count = 0
 
-        # Class-wise object count
-        st.subheader("📦 Class-wise Detection Count")
+        # Track overall detection information
+        all_scores = []
+        all_names = []
 
-        class_counts = detection_data["Object Name"].value_counts()
+        while cap.isOpened():
 
-        st.bar_chart(class_counts)
+            ret, frame = cap.read()
 
-    else:
+            if not ret:
+                break
 
-        st.warning("No objects detected in this image.")
+            # YOLO detection
+            results = model.predict(
+                source=frame,
+                conf=confidence,
+                verbose=False
+            )
 
-else:
+            # Annotate frame
+            annotated_frame = results[0].plot()
 
-    st.info("Please upload an image to start detection.")
+            out.write(annotated_frame)
+
+            # Collect detection scores
+            boxes = results[0].boxes
+
+            if boxes is not None and len(boxes) > 0:
+
+                for box in boxes:
+
+                    class_id = int(box.cls[0])
+                    class_name = model.names[class_id]
+                    score = float(box.conf[0])
+
+                    all_names.append(class_name)
+                    all_scores.append(score)
+
+            frame_count += 1
+
+            progress = min(
+                frame_count / max(total_frames, 1),
+                1.0
+            )
+
+            progress_bar.progress(progress)
+
+            status_text.write(
+                f"Processing frame {frame_count}/{total_frames}"
+            )
+
+        cap.release()
+        out.release()
+
+        status_text.success("Video processing completed!")
+
+        # Display processed video
+        st.subheader("🎬 Detection Output Video")
+
+        st.video(output_path)
+
+        # Video detection metrics
+        st.subheader("📊 Video Detection Summary")
+
+        if len(all_scores) > 0:
+
+            total_detections = len(all_scores)
+            avg_score = np.mean(all_scores) * 100
+            max_score = max(all_scores) * 100
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric(
+                "Total Detections",
+                total_detections
+            )
+
+            col2.metric(
+                "Average Confidence",
+                f"{avg_score:.2f}%"
+            )
+
+            col3.metric(
+                "Highest Confidence",
+                f"{max_score:.2f}%"
+            )
+
+            # Video detection table
+            video_df = pd.DataFrame({
+                "Object Name": all_names,
+                "Confidence Score (%)": [
+                    round(s * 100, 2)
+                    for s in all_scores
+                ]
+            })
+
+            st.subheader("Detected Object Details")
+
+            st.dataframe(
+                video_df,
+                use_container_width=True
+            )
+
+            # Class-wise count
+            st.subheader("Class-wise Detection Count")
+
+            st.bar_chart(
+                video_df["Object Name"].value_counts()
+            )
+
+        else:
+
+            st.warning("No objects detected in this video.")
+
+        # Download processed video
+        with open(output_path, "rb") as video_file:
+
+            st.download_button(
+                label="⬇️ Download Detection Video",
+                data=video_file,
+                file_name="construction_detection.mp4",
+                mime="video/mp4"
+            )
+
+        # Cleanup
+        os.remove(input_path)
+        os.remove(output_path)
